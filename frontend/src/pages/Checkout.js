@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { User, Truck, CreditCard, CheckCircle, ArrowLeft, Trash2 } from 'lucide-react';
+import { apiFetch } from "../api";
 
 function Checkout({ onOrderSuccess }) {
     const location = useLocation();
@@ -43,24 +44,18 @@ function Checkout({ onOrderSuccess }) {
     const handlePlaceOrder = async () => {
         setIsLoading(true);
         try {
-            const currentUser = JSON.parse(localStorage.getItem("userData"));
+            // The server looks up prices and sellers itself and works out the totals,
+            // so only product IDs and quantities are sent.
             const orderDetails = {
-                buyerId: currentUser._id,
-                // --- MODIFIED: Ensure quantity is included for each product ---
                 products: itemsToPurchase.map(item => ({
                     productId: item._id,
-                    name: item.name,
-                    price: item.price,
-                    quantity: item.quantity, // This is the crucial addition
-                    imageUrl: item.imageUrl,
-                    sellerId: item.sellerId._id,
+                    quantity: item.quantity,
                 })),
-                totalAmount: calculateTotal(),
                 shippingAddress: deliveryInfo,
                 paymentMethod: paymentMethod,
             };
 
-            const res = await fetch(`${process.env.REACT_APP_API_URL}/api/orders/create`, {
+            const res = await apiFetch(`/api/orders/create`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(orderDetails)

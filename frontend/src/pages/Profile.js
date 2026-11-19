@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Edit, Shield, HelpCircle, ShoppingBag, PlusCircle, BarChart2, Star, Eye, Camera, Upload, X, PackageCheck, AlertTriangle } from 'lucide-react';
+import { apiFetch } from "../api";
 
 const ShopClosedSign = ({ onClose }) => {
     return (
@@ -36,7 +37,7 @@ function Profile() {
             const fetchSellerData = async () => {
                 if (!parsedData?._id) return;
                 try {
-                    const ordersRes = await fetch(`${process.env.REACT_APP_API_URL}/api/orders/by-seller/${parsedData._id}`);
+                    const ordersRes = await apiFetch(`/api/orders/by-seller/${parsedData._id}`);
                     if (ordersRes.ok) {
                         const orders = await ordersRes.json();
                         
@@ -82,7 +83,7 @@ function Profile() {
         setIsShopOpen(newStatus);
         if (!userData || !userData.phone) return;
         try {
-            const res = await fetch(`${process.env.REACT_APP_API_URL}/api/users/update-profile`, {
+            const res = await apiFetch(`/api/users/update-profile`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ phone: userData.phone, isShopOpen: newStatus })
@@ -109,7 +110,7 @@ function Profile() {
         const formData = new FormData();
         formData.append('image', file);
         try {
-            const uploadRes = await fetch(`${process.env.REACT_APP_API_URL}/api/upload`, {
+            const uploadRes = await apiFetch(`/api/upload`, {
                 method: 'POST',
                 body: formData,
             });
@@ -117,7 +118,7 @@ function Profile() {
             if (!uploadRes.ok) throw new Error(uploadData.message || 'Image upload failed.');
             
             const { imageUrl } = uploadData;
-            const updateRes = await fetch(`${process.env.REACT_APP_API_URL}/api/users/update-profile`, {
+            const updateRes = await apiFetch(`/api/users/update-profile`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ phone: userData.phone, profilePicUrl: imageUrl })

@@ -1,5 +1,6 @@
 import express from "express";
 import Product from "../models/Product.js";
+import { requireAuth } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -10,8 +11,12 @@ router.get("/all", async (req, res) => {
             .populate('sellerId', 'name shopName isShopOpen') // Also get the shop status
             .sort({ createdAt: -1 });
 
-        const shuffledProducts = products.sort(() => 0.5 - Math.random());
-        res.json(shuffledProducts);
+        // Fisher-Yates shuffle (sorting with a random comparator gives a biased order)
+        for (let i = products.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [products[i], products[j]] = [products[j], products[i]];
+        }
+        res.json(products);
     } catch (err) {
         console.error("Error fetching all products:", err);
         res.status(500).json({ message: "Server error while fetching products." });
@@ -30,17 +35,20 @@ router.get("/by-seller/:sellerId", async (req, res) => {
     }
 });
 
-// Add a new product
-router.post("/add", async (req, res) => {
+// Add a new product for the logged-in seller
+router.post("/add", requireAuth, async (req, res) => {
     try {
-        const { name, description, price, quantity, sellerId, imageUrl } = req.body;
+        const { name, description, price, quantity, imageUrl } = req.body;
 
         // Validate and convert data types before saving.
         const numericPrice = Number(price);
         const numericQuantity = Number(quantity);
 
-        if (isNaN(numericPrice) || isNaN(numericQuantity)) {
-            return res.status(400).json({ message: "Price and quantity must be valid numbers." });
+        if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+            return res.status(400).json({ message: "Price must be a number greater than 0." });
+        }
+        if (!Number.isInteger(numericQuantity) || numericQuantity < 0) {
+            return res.status(400).json({ message: "Quantity must be a whole number (0 or more)." });
         }
 
         const newProduct = new Product({
@@ -49,7 +57,7 @@ router.post("/add", async (req, res) => {
             price: numericPrice,
             quantity: numericQuantity,
             imageUrl,
-            sellerId,
+            sellerId: req.userId,
         });
 
         await newProduct.save();
@@ -58,7 +66,7 @@ router.post("/add", async (req, res) => {
     } catch (err) {
         console.error("--- ERROR ADDING PRODUCT ---");
         console.error("Error Message:", err.message);
-        res.status(500).json({ message: "Server error while adding product.", error: err.message });
+        res.status(500).json({ message: "Server error while adding product." });
     }
 });
 

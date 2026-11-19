@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 // Fixed ESLint warnings
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Type, Image as ImageIcon, MessageSquare, Tag, Hash, CheckCircle, Mic, Square, Loader, Sparkles, Globe, AlertCircle, Eye } from 'lucide-react';
+import { apiFetch } from "../api";
 
 const ProgressBar = ({ step, totalSteps }) => {
     const progress = Math.min(100, Math.max(0, ((step - 1) / (totalSteps - 1)) * 100));
@@ -121,7 +122,7 @@ function AddProduct() {
             formDataPayload.append('audio', audioBlob, 'recording.webm');
             formDataPayload.append('language', selectedLanguage);
 
-            const res = await fetch(`${process.env.REACT_APP_API_URL}/api/voice/analyze`, {
+            const res = await apiFetch(`/api/voice/analyze`, {
                 method: 'POST',
                 body: formDataPayload,
             });
@@ -177,7 +178,7 @@ function AddProduct() {
             const imageFormData = new FormData();
             imageFormData.append('image', imageFile);
 
-            const uploadRes = await fetch(`${process.env.REACT_APP_API_URL}/api/upload`, {
+            const uploadRes = await apiFetch(`/api/upload`, {
                 method: 'POST',
                 body: imageFormData,
             });
@@ -192,7 +193,7 @@ function AddProduct() {
                 sellerId: currentUser._id
             };
 
-            const res = await fetch(`${process.env.REACT_APP_API_URL}/api/products/add`, {
+            const res = await apiFetch(`/api/products/add`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(productData)

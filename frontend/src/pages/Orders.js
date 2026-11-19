@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShoppingBag, X, AlertTriangle, Phone, Shield } from 'lucide-react';
 import './Orders.css';
+import { apiFetch } from "../api";
 
 // --- Reusable Confirmation Modal ---
 const IssueConfirmationModal = ({ onConfirm, onCancel, step, seller, issueType, setIssueType, issueDescription, setIssueDescription }) => {
@@ -177,7 +178,7 @@ function Orders() {
         const buyerId = JSON.parse(savedData)._id;
 
         try {
-            const res = await fetch(`${process.env.REACT_APP_API_URL}/api/orders/by-buyer/${buyerId}`);
+            const res = await apiFetch(`/api/orders/by-buyer/${buyerId}`);
             if (!res.ok) throw new Error("Could not fetch your orders.");
             const data = await res.json();
             const sortedOrders = data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -204,7 +205,7 @@ function Orders() {
         } else if (modalStep === 2) {
             try {
                 // Call API to report issue with details
-                const res = await fetch(`${process.env.REACT_APP_API_URL}/api/orders/report-issue/${issueOrder._id}`, {
+                const res = await apiFetch(`/api/orders/report-issue/${issueOrder._id}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ issueType, issueDescription })
@@ -240,7 +241,7 @@ function Orders() {
 
     const handleResolveIssue = async (orderId, userType) => {
         try {
-            const res = await fetch(`${process.env.REACT_APP_API_URL}/api/orders/resolve-issue/${orderId}`, {
+            const res = await apiFetch(`/api/orders/resolve-issue/${orderId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ userType }),
