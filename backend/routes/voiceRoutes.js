@@ -4,15 +4,17 @@ import Groq from 'groq-sdk';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // Configure multer for memory storage
 const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+// Limit uploads to 10 MB so a large file can't exhaust server memory
+const upload = multer({ storage: storage, limits: { fileSize: 10 * 1024 * 1024 } });
 
 // POST /api/voice/analyze
-router.post('/analyze', upload.single('audio'), async (req, res) => {
+router.post('/analyze', requireAuth, upload.single('audio'), async (req, res) => {
     console.log("--- HIT /api/voice/analyze ---"); // Proof of life log
     let tempFilePath = null;
     try {
@@ -99,7 +101,7 @@ router.post('/analyze', upload.single('audio'), async (req, res) => {
              console.error("CRITICAL: Groq API Key appears to be invalid or missing.");
         }
 
-        res.status(500).json({ message: "Server error during voice analysis.", error: err.message });
+        res.status(500).json({ message: "Server error during voice analysis." });
     } finally {
         // Cleanup temp file
         if (tempFilePath) {

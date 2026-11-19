@@ -1,63 +1,119 @@
 import express from "express";
+import mongoose from "mongoose";
 import Order from "../models/Order.js";
+import Product from "../models/Product.js";
+import { requireAuth, requireSelf } from "../middleware/auth.js";
 
 const router = express.Router();
 
-// **THE FIX**: This route is now much smarter.
-// It takes a single checkout and creates multiple orders, one for each seller.
+router.use(requireAuth);
+
+const SELLER_STATUSES = ["Pending", "Confirmed", "Packed", "Shipped", "Delivered", "Cancelled", "Rejected"];
+const RESTOCK_STATUSES = ["Cancelled", "Rejected"];
+const ISSUE_TYPES = ["not_received", "damaged", "wrong_item", "incomplete", "other"];
+
+// Puts stock back for a list of { productId, quantity } items.
+async function restock(items) {
+    await Promise.all(items.map(({ productId, quantity }) =>
+        Product.updateOne({ _id: productId }, { $inc: { quantity } })
+    ));
+}
+
+// Create orders from a checkout. One checkout becomes one order per seller.
+// Prices, names and sellers are read from the database, never trusted from the client.
 router.post("/create", async (req, res) => {
+    const reserved = []; // stock already taken, so it can be returned if something fails
     try {
-        const { buyerId, products, totalAmount, shippingAddress, paymentMethod } = req.body;
+        const { products, shippingAddress, paymentMethod } = req.body;
 
-        // Step 1: Group products by their sellerId
-        const ordersBySeller = products.reduce((acc, product) => {
-            const sellerId = product.sellerId.toString();
-            if (!acc[sellerId]) {
-                acc[sellerId] = [];
+        if (!Array.isArray(products) || products.length === 0) {
+            return res.status(400).json({ message: "Your order has no items." });
+        }
+        if (!paymentMethod) {
+            return res.status(400).json({ message: "Please choose a payment method." });
+        }
+
+        // Merge duplicate lines and validate quantities.
+        const requested = new Map();
+        for (const item of products) {
+            const quantity = Number(item.quantity);
+            if (!mongoose.isValidObjectId(item.productId) || !Number.isInteger(quantity) || quantity < 1) {
+                return res.status(400).json({ message: "Invalid item in order." });
             }
-            acc[sellerId].push(product);
-            return acc;
-        }, {});
+            requested.set(item.productId, (requested.get(item.productId) || 0) + quantity);
+        }
 
-        // Step 2: Create a separate order for each seller
-        const createdOrders = [];
-        for (const sellerId in ordersBySeller) {
-            const sellerProducts = ordersBySeller[sellerId];
-            
-            // Calculate the total amount for this specific seller's order
-            const sellerTotalAmount = sellerProducts.reduce((sum, product) => sum + product.price, 0);
+        const dbProducts = await Product.find({ _id: { $in: [...requested.keys()] } })
+            .populate("sellerId", "isShopOpen");
+        if (dbProducts.length !== requested.size) {
+            return res.status(400).json({ message: "Some items in your order no longer exist." });
+        }
 
-            const newOrder = new Order({
-                buyerId,
-                sellerId, // Add the sellerId to the top-level of the order
-                products: sellerProducts,
-                totalAmount: sellerTotalAmount,
+        for (const product of dbProducts) {
+            if (!product.sellerId || product.sellerId.isShopOpen === false) {
+                return res.status(400).json({ message: `"${product.name}" is currently unavailable.` });
+            }
+            if (product.sellerId._id.toString() === req.userId) {
+                return res.status(400).json({ message: `You can't buy your own product ("${product.name}").` });
+            }
+        }
+
+        // Reserve stock atomically: the update only succeeds if enough quantity is left.
+        for (const product of dbProducts) {
+            const quantity = requested.get(product._id.toString());
+            const updated = await Product.findOneAndUpdate(
+                { _id: product._id, quantity: { $gte: quantity } },
+                { $inc: { quantity: -quantity } }
+            );
+            if (!updated) {
+                await restock(reserved);
+                return res.status(409).json({
+                    message: `Only ${product.quantity} left of "${product.name}". Please reduce the quantity.`,
+                });
+            }
+            reserved.push({ productId: product._id, quantity });
+        }
+
+        // Group lines by seller.
+        const ordersBySeller = {};
+        for (const product of dbProducts) {
+            const sellerId = product.sellerId._id.toString();
+            (ordersBySeller[sellerId] ||= []).push({
+                productId: product._id,
+                name: product.name,
+                price: product.price,
+                quantity: requested.get(product._id.toString()),
+                imageUrl: product.imageUrl,
+                sellerId,
+            });
+        }
+
+        const createdOrders = await Order.insertMany(
+            Object.entries(ordersBySeller).map(([sellerId, lines]) => ({
+                buyerId: req.userId,
+                sellerId,
+                products: lines,
+                totalAmount: lines.reduce((sum, line) => sum + line.price * line.quantity, 0),
                 shippingAddress,
                 paymentMethod,
-                status: 'Pending', // All new orders start as pending
-            });
-            const savedOrder = await newOrder.save();
-            createdOrders.push(savedOrder);
-        }
+                status: "Pending",
+            }))
+        );
 
         res.status(201).json({ message: "Orders created successfully!", orders: createdOrders });
-
     } catch (err) {
-        console.error("--- ERROR CREATING ORDER ---");
-        console.error("Error Name:", err.name);
-        console.error("Error Message:", err.message);
-        if (err.errors) {
-            console.error("Validation Errors:", JSON.stringify(err.errors, null, 2));
-        }
-        console.error("----------------------------");
-        res.status(500).json({ message: "Server error while creating order.", error: err.message });
+        console.error("Error creating order:", err);
+        if (reserved.length) await restock(reserved).catch(() => {});
+        res.status(500).json({ message: "Server error while creating order." });
     }
 });
 
-// Get all orders for a specific buyer
-router.get("/by-buyer/:buyerId", async (req, res) => {
+// Orders placed by the logged-in buyer
+router.get("/by-buyer/:buyerId", requireSelf("buyerId"), async (req, res) => {
     try {
-        const orders = await Order.find({ buyerId: req.params.buyerId }).populate('sellerId', 'shopName phone email').sort({ createdAt: -1 });
+        const orders = await Order.find({ buyerId: req.params.buyerId })
+            .populate("sellerId", "shopName phone")
+            .sort({ createdAt: -1 });
         res.json(orders);
     } catch (err) {
         console.error("Error fetching buyer's orders:", err);
@@ -65,26 +121,23 @@ router.get("/by-buyer/:buyerId", async (req, res) => {
     }
 });
 
-// **NEW**: Get all orders for a specific seller
-router.get("/by-seller/:sellerId", async (req, res) => {
+// Orders received by the logged-in seller
+router.get("/by-seller/:sellerId", requireSelf("sellerId"), async (req, res) => {
     try {
         const orders = await Order.find({ sellerId: req.params.sellerId })
-            .populate('buyerId', 'name') // Show the buyer's name to the seller
+            .populate("buyerId", "name")
             .sort({ createdAt: -1 });
         res.json(orders);
     } catch (err) {
         console.error("Error fetching seller's orders:", err);
-        res.status(500).json({ message: "Server error while fetching seller's products." });
+        res.status(500).json({ message: "Server error while fetching seller's orders." });
     }
 });
 
-// **NEW**: Get a count of pending orders for a seller
-router.get("/pending-count/:sellerId", async (req, res) => {
+// Count of pending orders for the logged-in seller
+router.get("/pending-count/:sellerId", requireSelf("sellerId"), async (req, res) => {
     try {
-        const count = await Order.countDocuments({ 
-            sellerId: req.params.sellerId, 
-            status: 'Pending' 
-        });
+        const count = await Order.countDocuments({ sellerId: req.params.sellerId, status: "Pending" });
         res.json({ count });
     } catch (err) {
         console.error("Error fetching pending order count:", err);
@@ -92,18 +145,31 @@ router.get("/pending-count/:sellerId", async (req, res) => {
     }
 });
 
-// **NEW**: Allow a seller to update an order's status
+// Seller updates the status of one of their own orders
 router.put("/update-status/:orderId", async (req, res) => {
     try {
         const { status } = req.body;
-        const order = await Order.findByIdAndUpdate(
-            req.params.orderId,
-            { status },
-            { new: true }
-        );
+        if (!SELLER_STATUSES.includes(status)) {
+            return res.status(400).json({ message: "Invalid order status." });
+        }
+
+        const order = await Order.findById(req.params.orderId);
         if (!order) {
             return res.status(404).json({ message: "Order not found." });
         }
+        if (order.sellerId.toString() !== req.userId) {
+            return res.status(403).json({ message: "Only the seller can update this order." });
+        }
+
+        const wasActive = !RESTOCK_STATUSES.includes(order.status);
+        order.status = status;
+        await order.save();
+
+        // Cancelling or rejecting an order returns its items to stock.
+        if (wasActive && RESTOCK_STATUSES.includes(status)) {
+            await restock(order.products.map((p) => ({ productId: p.productId, quantity: p.quantity })));
+        }
+
         res.json({ message: "Order status updated!", order });
     } catch (err) {
         console.error("Error updating order status:", err);
@@ -111,20 +177,23 @@ router.put("/update-status/:orderId", async (req, res) => {
     }
 });
 
-// **NEW**: Allow a buyer to report a delivery issue
+// Buyer reports a delivery issue on one of their own orders
 router.put("/report-issue/:orderId", async (req, res) => {
     try {
         const { issueType, issueDescription } = req.body;
-        const updateData = {
-            hasDeliveryIssue: true,
-            issueType,
-            issueDescription,
-            buyerResolved: false,
-            sellerResolved: false
-        };
-        const order = await Order.findByIdAndUpdate(
-            req.params.orderId,
-            updateData,
+        if (!ISSUE_TYPES.includes(issueType)) {
+            return res.status(400).json({ message: "Invalid issue type." });
+        }
+
+        const order = await Order.findOneAndUpdate(
+            { _id: req.params.orderId, buyerId: req.userId },
+            {
+                hasDeliveryIssue: true,
+                issueType,
+                issueDescription: issueDescription || "",
+                buyerResolved: false,
+                sellerResolved: false,
+            },
             { new: true }
         );
         if (!order) {
@@ -137,23 +206,28 @@ router.put("/report-issue/:orderId", async (req, res) => {
     }
 });
 
-// **NEW**: Allow buyer or seller to mark issue as resolved
+// Buyer or seller marks an issue as resolved from their side.
+// Which side is decided by who is logged in, not by the request body.
 router.put("/resolve-issue/:orderId", async (req, res) => {
     try {
-        const { userType } = req.body; // 'buyer' or 'seller'
-        const updateData = userType === 'buyer' ? { buyerResolved: true } : { sellerResolved: true };
-        const order = await Order.findByIdAndUpdate(
-            req.params.orderId,
-            updateData,
-            { new: true }
-        );
+        const order = await Order.findById(req.params.orderId);
         if (!order) {
             return res.status(404).json({ message: "Order not found." });
         }
-        // If both have resolved, mark as resolved
-        if (order.buyerResolved && order.sellerResolved) {
-            await Order.findByIdAndUpdate(req.params.orderId, { hasDeliveryIssue: false });
+
+        if (order.buyerId.toString() === req.userId) {
+            order.buyerResolved = true;
+        } else if (order.sellerId.toString() === req.userId) {
+            order.sellerResolved = true;
+        } else {
+            return res.status(403).json({ message: "You are not part of this order." });
         }
+
+        if (order.buyerResolved && order.sellerResolved) {
+            order.hasDeliveryIssue = false;
+        }
+        await order.save();
+
         res.json({ message: "Issue resolution updated!", order });
     } catch (err) {
         console.error("Error resolving issue:", err);
@@ -161,16 +235,13 @@ router.put("/resolve-issue/:orderId", async (req, res) => {
     }
 });
 
-// **NEW**: Get count of unresolved issues for a seller
-router.get("/issues-count/:sellerId", async (req, res) => {
+// Count of unresolved delivery issues for the logged-in seller
+router.get("/issues-count/:sellerId", requireSelf("sellerId"), async (req, res) => {
     try {
         const count = await Order.countDocuments({
             sellerId: req.params.sellerId,
             hasDeliveryIssue: true,
-            $or: [
-                { buyerResolved: false },
-                { sellerResolved: false }
-            ]
+            $or: [{ buyerResolved: false }, { sellerResolved: false }],
         });
         res.json({ count });
     } catch (err) {
@@ -179,6 +250,4 @@ router.get("/issues-count/:sellerId", async (req, res) => {
     }
 });
 
-
 export default router;
-

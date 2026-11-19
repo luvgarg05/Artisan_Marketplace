@@ -2,6 +2,7 @@ import React, { useState, Suspense } from "react";
 import { Link } from "react-router-dom";
 // This import will now work because you ran "npm install"
 import Spline from '@splinetool/react-spline';
+import { apiFetch, setToken } from "../api";
 
 // A simple SVG icon for the login page header
 const LoginIcon = () => (
@@ -31,7 +32,7 @@ function Login({ onLoginSuccess }) {
     setIsLoading(true);
 
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_URL}/api/users/login`, {
+      const res = await apiFetch(`/api/users/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone, password }),
@@ -43,6 +44,7 @@ function Login({ onLoginSuccess }) {
         throw new Error(data.message || "Login failed. Please check your credentials.");
       }
       
+      setToken(data.token);
       onLoginSuccess(data.user);
 
     } catch (err) {

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, Check, Truck, Search, X as RejectIcon, Archive as PackedIcon, AlertTriangle } from 'lucide-react';
 import './SellerOrders.css';
+import { apiFetch } from "../api";
 
 // --- Main Seller Orders Page ---
 function SellerOrders() {
@@ -20,7 +21,7 @@ function SellerOrders() {
         const sellerId = JSON.parse(savedData)._id;
         try {
             setIsLoading(true);
-            const res = await fetch(`${process.env.REACT_APP_API_URL}/api/orders/by-seller/${sellerId}`);
+            const res = await apiFetch(`/api/orders/by-seller/${sellerId}`);
             if (!res.ok) throw new Error("Could not fetch your orders.");
             const data = await res.json();
             const sortedData = data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -38,7 +39,7 @@ function SellerOrders() {
 
     const handleUpdateStatus = async (orderId, newStatus) => {
         try {
-            const res = await fetch(`${process.env.REACT_APP_API_URL}/api/orders/update-status/${orderId}`, {
+            const res = await apiFetch(`/api/orders/update-status/${orderId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ status: newStatus }),
@@ -52,7 +53,7 @@ function SellerOrders() {
 
     const handleResolveIssue = async (orderId, userType) => {
         try {
-            const res = await fetch(`${process.env.REACT_APP_API_URL}/api/orders/resolve-issue/${orderId}`, {
+            const res = await apiFetch(`/api/orders/resolve-issue/${orderId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ userType }),

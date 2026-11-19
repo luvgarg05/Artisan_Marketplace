@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { auth } from '../firebase';
 import { RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 import { Phone, MessageSquare, Lock, CheckCircle } from 'lucide-react';
+import { apiFetch } from "../api";
 
 function ResetPassword() {
     const [step, setStep] = useState(1);
@@ -97,10 +98,15 @@ function ResetPassword() {
         setIsLoading(true);
         setError('');
         try {
-            const res = await fetch(`${process.env.REACT_APP_API_URL}/api/users/reset-password`, {
+            const res = await apiFetch(`/api/users/reset-password`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone, newPassword })
+                body: JSON.stringify({
+                    phone,
+                    newPassword,
+                    // Proves to the server that this phone's OTP was just verified
+                    firebaseToken: auth.currentUser ? await auth.currentUser.getIdToken() : null,
+                })
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.message);

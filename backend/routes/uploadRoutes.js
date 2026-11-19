@@ -1,10 +1,11 @@
 import express from 'express';
 import upload from '../utils/cloudinary.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // This route uses a custom function to wrap the middleware, providing better error handling.
-router.post('/', (req, res) => {
+router.post('/', requireAuth, (req, res) => {
   const uploader = upload.single('image');
 
   uploader(req, res, function (err) {

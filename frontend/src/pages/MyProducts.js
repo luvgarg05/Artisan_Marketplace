@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { PlusCircle } from 'lucide-react';
 import ProductCard from '../components/ProductCard'; // Import the shared component
+import { apiFetch } from "../api";
 
 function MyProducts() {
     const [products, setProducts] = useState([]);
@@ -19,7 +20,7 @@ function MyProducts() {
             const sellerId = JSON.parse(savedData)._id;
 
             try {
-                const res = await fetch(`${process.env.REACT_APP_API_URL}/api/products/by-seller/${sellerId}`);
+                const res = await apiFetch(`/api/products/by-seller/${sellerId}`);
                 if (!res.ok) throw new Error("Could not fetch your products.");
                 const data = await res.json();
                 setProducts(data);

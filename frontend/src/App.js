@@ -27,6 +27,8 @@ import HelpPage from "./pages/HelpPage";
 import AddProduct from "./pages/AddProduct";
 import RegistrationSuccess from "./pages/RegistrationSuccess";
 import Checkout from "./pages/Checkout";
+import { apiFetch, setToken, getToken, clearSession } from "./api";
+import { auth } from "./firebase";
 
 // --- Notification Component ---
 const Notification = ({ message, visible }) => {
@@ -44,8 +46,10 @@ function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
+  // A session is only valid if the login token is present too
+  // (older sessions saved before tokens were added must log in again).
   const [verified, setVerified] = useState(() => {
-    return localStorage.getItem("verified") === "true";
+    return localStorage.getItem("verified") === "true" && !!getToken();
   });
 
   const [cartItems, setCartItems] = useState(() => {
@@ -82,10 +86,11 @@ function App() {
 
   // Fetch issues count for sellers
   useEffect(() => {
-    if (verified && userData && userData.role === 'seller') {
+    // Every user can sell, so fetch the seller issue count for any logged-in user.
+    if (verified && userData) {
       const fetchIssuesCount = async () => {
         try {
-          const res = await fetch(`${process.env.REACT_APP_API_URL}/api/orders/issues-count/${userData._id}`);
+          const res = await apiFetch(`/api/orders/issues-count/${userData._id}`);
           if (res.ok) {
             const data = await res.json();
             setIssuesCount(data.count);
@@ -155,18 +160,23 @@ function App() {
 
   const handlePasswordSet = async (finalData) => {
     try {
-      const res = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/users/register`,
+      const res = await apiFetch(
+        `/api/users/register`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(finalData),
+          // Firebase ID token proves to the server that the phone OTP was verified.
+          body: JSON.stringify({
+            ...finalData,
+            firebaseToken: auth.currentUser ? await auth.currentUser.getIdToken() : null,
+          }),
         }
       );
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Failed to save user");
 
+      setToken(data.token);
       setUserData(data.user);
       setVerified(true);
       localStorage.setItem("userData", JSON.stringify(data.user));
@@ -182,9 +192,9 @@ function App() {
   const handleLogout = () => {
     setUserData(null);
     setVerified(false);
-    localStorage.removeItem("userData");
-    localStorage.removeItem("verified");
+    clearSession();
     localStorage.removeItem("cartItems");
+    auth.signOut().catch(() => {});
     navigate("/");
   };
 

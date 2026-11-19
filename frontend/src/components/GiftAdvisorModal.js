@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
+import { apiFetch } from '../api';
 
 // This is the standalone AI Gift Advisor component.
 function GiftAdvisorModal({ products, onClose, onProductSelect }) {
@@ -18,75 +19,31 @@ function GiftAdvisorModal({ products, onClose, onProductSelect }) {
         setIsLoading(true);
         setSuggestions([]);
 
-        const availableProducts = products
-            .filter(p => !p.isOutOfStock)
-            .map(p => ({ name: p.name, description: p.description }));
-
-        const prompt = `
-            You are a friendly and helpful gift advisor for an online marketplace of handmade goods.
-            Based on the following occasion and recipient description, please recommend up to 3 products from the list of available items.
-            For each recommendation, provide a short, creative reason why it's a good gift.
-
-            Occasion: ${occasion}
-            Recipient Description: ${recipient}
-            
-            Available products:
-            ${JSON.stringify(availableProducts)}
-        `;
-
         try {
-            const apiKey = "";
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
-
-            const payload = {
-                contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: "OBJECT",
-                        properties: {
-                            recommendations: {
-                                type: "ARRAY",
-                                items: {
-                                    type: "OBJECT",
-                                    properties: {
-                                        productName: { type: "STRING" },
-                                        reasoning: { type: "STRING" },
-                                    },
-                                    required: ["productName", "reasoning"],
-                                },
-                            },
-                        },
-                    },
-                },
-            };
-
-            const res = await fetch(apiUrl, {
+            // The AI call runs on our backend so no API key is exposed in the browser.
+            const res = await apiFetch(`/api/ai/gift-advice`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify({ occasion, recipient }),
             });
-
-            if (!res.ok) {
-                throw new Error(`API error: ${res.statusText}`);
-            }
-
             const data = await res.json();
-            const resultText = data.candidates[0].content.parts[0].text;
-            const parsedResult = JSON.parse(resultText);
+            if (!res.ok) throw new Error(data.message);
 
-            if (parsedResult.recommendations && parsedResult.recommendations.length > 0) {
-                 const recommendedProducts = parsedResult.recommendations.map(rec => {
-                    const fullProduct = products.find(p => p.name === rec.productName);
-                    return { ...fullProduct, reasoning: rec.reasoning };
-                }).filter(Boolean);
+            const recommendedProducts = (data.recommendations || [])
+                .map(rec => {
+                    const fullProduct = products.find(p => p._id === rec.productId);
+                    return fullProduct ? { ...fullProduct, reasoning: rec.reasoning } : null;
+                })
+                .filter(Boolean);
+
+            if (recommendedProducts.length > 0) {
                 setSuggestions(recommendedProducts);
             } else {
                 setError("I couldn't find a suitable gift based on your description. Please try being more specific!");
             }
 
         } catch (err) {
-            console.error("Gemini API call failed:", err);
+            console.error("Gift advisor request failed:", err);
             setError("Sorry, I'm having trouble thinking of a gift right now. Please try again later.");
         } finally {
             setIsLoading(false);

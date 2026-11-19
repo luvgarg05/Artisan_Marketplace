@@ -9,6 +9,7 @@ import QuantityModal from '../components/QuantityModal'; // Import the new modal
 
 // Import the stylesheet for this page
 import './Home.css';
+import { apiFetch } from "../api";
 
 // --- Components defined within Home.js ---
 
@@ -77,7 +78,7 @@ function Home({ addToCart }) {
     useEffect(() => {
         const fetchProducts = async () => {
             try {
-                const res = await fetch(`${process.env.REACT_APP_API_URL}/api/products/all`);
+                const res = await apiFetch(`/api/products/all`);
                 if (!res.ok) throw new Error('Network response was not ok');
                 const data = await res.json();
                 setProducts(data);
